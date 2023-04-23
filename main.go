@@ -19,7 +19,6 @@ func run(args []string) error {
 		return fmt.Errorf("project name is required")
 	}
 	projectName := os.Args[len(os.Args)-1]
-	fmt.Println("Projct name:", projectName)
 	if err := createDirectory(projectName); err != nil {
 		return err
 	}
@@ -27,37 +26,40 @@ func run(args []string) error {
 }
 
 func createDirectory(pathname string) error {
-	file, err := os.Stat(pathname)
-	if os.IsNotExist(err) {
-		if err := os.MkdirAll(pathname, os.ModePerm); err != nil {
+	file, err := os.Open(pathname)
+	if err != nil {
+		// only move forward if file does not exist
+		if !os.IsNotExist(err) {
 			return err
 		}
-	} else if err != nil {
-		return err
-	} else if !file.IsDir() {
-		return fmt.Errorf("%s is not a directory", file.Name())
+		// Stop execution whether we create the directory or fail
+		if err := os.MkdirAll(pathname, os.ModePerm); err != nil {
+			return err
+		} else {
+			return nil
+		}
 	}
-	ok, err := isDirEmpty(pathname)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("%s is not an empty directory", pathname)
-	}
-	return nil
+	defer file.Close()
+
+	return isDirEmpty(file)
 }
 
-func isDirEmpty(name string) (bool, error) {
-	f, err := os.Open(name)
+func isDirEmpty(file *os.File) error {
+	f, err := file.Stat()
 	if err != nil {
-		return false, err
+		return err
 	}
-	defer f.Close()
-
-	_, err = f.Readdirnames(1)
-	if err == io.EOF {
-		return true, nil
+	if !f.IsDir() {
+		return fmt.Errorf("%s is not a directory", file.Name())
 	}
-	return false, err // Either not empty or error, suits both cases
 
+	fileNames, err := file.Readdirnames(1)
+	if err != nil && err != io.EOF {
+		return err
+	}
+	if len(fileNames) > 0 {
+		return fmt.Errorf("%s is not an empty directory", file.Name())
+	}
+
+	return nil
 }
