@@ -16,32 +16,84 @@ func main() {
 	}
 }
 
-func run(args []string) error {
-	pushToGithub := flag.Bool("gpush", false, "Push local repository to the Github using Github CLI")
-	isRepoPrivate := flag.Bool("gprivate", false, "Make the new repository private")
-	flag.Parse()
+var (
+	createCmd = flag.NewFlagSet("create", flag.ExitOnError)
+	deleteCmd = flag.NewFlagSet("delete", flag.ExitOnError)
 
-	if len(os.Args) < 2 {
-		return fmt.Errorf("project name is required")
+	subcommands = map[string]*flag.FlagSet{
+		createCmd.Name(): createCmd,
+		deleteCmd.Name(): deleteCmd,
 	}
-	projectName := os.Args[len(os.Args)-1]
+)
+
+func run(args []string) error {
+	if len(os.Args) < 2 {
+		return fmt.Errorf("a command is required")
+	}
+
+	cmd := subcommands[os.Args[1]]
+	if cmd == nil {
+		return fmt.Errorf("uknown %q command", os.Args[1])
+	}
+
+	switch cmd.Name() {
+	case "create":
+		shouldPushToGithub := cmd.Bool("gpush", false, "Push local repository to the Github using Github CLI")
+		isRepoPrivate := cmd.Bool("gprivate", false, "Make the new repository private")
+		projectName := cmd.String("p", "", "Project name")
+		cmd.Parse(os.Args[2:])
+
+		dir, err := createProject(*projectName, *shouldPushToGithub, *isRepoPrivate)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Your %q project is ready at\n%s\n", dir.friendlyName, dir.absPath)
+	default:
+		return fmt.Errorf("only create command supported")
+	}
+
+	return nil
+}
+
+func createProject(projectName string, shouldPushToGithub, isRepoPrivate bool) (*directory, error) {
+	if projectName == "" {
+		return nil, fmt.Errorf("project name is required")
+	}
+
 	dir, err := createDirectory(projectName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer dir.Close()
 
 	if err := dir.ChdirToProjectDir(); err != nil {
-		return err
+		return nil, err
 	}
 	defer dir.ChdirToPWD()
 
+	if err := setupGitRepo(projectName); err != nil {
+		if err := dir.Clean(); err != nil {
+			fmt.Printf("failed to clean %s directory. %v \n", dir.friendlyName, err)
+		}
+		return nil, err
+	}
+
+	if shouldPushToGithub {
+		if err := pushToGithub(projectName, isRepoPrivate); err != nil {
+			if err := dir.Clean(); err != nil {
+				fmt.Printf("failed to clean %s directory. %v \n", dir.friendlyName, err)
+			}
+			return nil, err
+		}
+	}
+
+	return dir, err
+}
+
+func setupGitRepo(projectName string) error {
 	cmd := exec.Command("git", "init")
 	cmd.Stdout = os.Stdout
 	if err := cmd.Run(); err != nil {
-		if err := dir.Clean(); err != nil {
-			fmt.Printf("failed to clean %s directory. %v\n", dir.friendlyName, err)
-		}
 		return err
 	}
 
@@ -52,42 +104,26 @@ func run(args []string) error {
 	}
 	cmd = exec.Command("git", "add", "README.md")
 	if err := cmd.Run(); err != nil {
-		if err := dir.Clean(); err != nil {
-			fmt.Printf("failed to clean %s directory. %v\n", dir.friendlyName, err)
-		}
 		return err
 	}
 
-	cmd = exec.Command("git", "commit", "-m", "init project")
-	if err := cmd.Run(); err != nil {
-		if err := dir.Clean(); err != nil {
-			fmt.Printf("failed to clean %s directory. %v\n", dir.friendlyName, err)
-		}
-		return err
+	return exec.Command("git", "commit", "-m", "init project").Run()
+}
+
+func pushToGithub(projectName string, isRepoPrivate bool) error {
+	ghPath, err := exec.LookPath("gh")
+	if err != nil {
+		return fmt.Errorf("gh command is not found. please install github cli to push repository to github")
 	}
+	cmd := exec.Command(ghPath, "repo", "create", projectName, "--source=.", "--remote=upstream", "--push")
+	cmd.Stdout = os.Stdout
 
-	if *pushToGithub {
-		ghPath, err := exec.LookPath("gh")
-		if err != nil {
-			fmt.Println("gh command is not found. please install github cli to push repository to github")
-		} else {
-			cmd := exec.Command(ghPath, "repo", "create", projectName, "--source=.", "--remote=upstream", "--push")
-			cmd.Stdout = os.Stdout
-
-			if *isRepoPrivate {
-				cmd.Args = append(cmd.Args, "--private")
-			} else {
-				cmd.Args = append(cmd.Args, "--public")
-			}
-			if err := cmd.Run(); err != nil {
-				return err
-			}
-		}
+	if isRepoPrivate {
+		cmd.Args = append(cmd.Args, "--private")
+	} else {
+		cmd.Args = append(cmd.Args, "--public")
 	}
-
-	fmt.Printf("Your %q project is ready at\n%s\n", dir.friendlyName, dir.absPath)
-
-	return nil
+	return cmd.Run()
 }
 
 type directory struct {
