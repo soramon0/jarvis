@@ -16,22 +16,13 @@ func main() {
 	}
 }
 
-var (
-	createCmd = flag.NewFlagSet("create", flag.ExitOnError)
-	deleteCmd = flag.NewFlagSet("delete", flag.ExitOnError)
-
-	subcommands = map[string]*flag.FlagSet{
-		createCmd.Name(): createCmd,
-		deleteCmd.Name(): deleteCmd,
-	}
-)
-
 func run(args []string) error {
 	if len(os.Args) < 2 {
 		return fmt.Errorf("a command is required")
 	}
 
-	cmd := subcommands[os.Args[1]]
+	commands := setupCommands()
+	cmd := commands[os.Args[1]]
 	if cmd == nil {
 		return fmt.Errorf("uknown %q command", os.Args[1])
 	}
@@ -53,6 +44,18 @@ func run(args []string) error {
 	}
 
 	return nil
+}
+
+func setupCommands() map[string]*flag.FlagSet {
+	var (
+		createCmd = flag.NewFlagSet("create", flag.ExitOnError)
+		deleteCmd = flag.NewFlagSet("delete", flag.ExitOnError)
+	)
+
+	return map[string]*flag.FlagSet{
+		createCmd.Name(): createCmd,
+		deleteCmd.Name(): deleteCmd,
+	}
 }
 
 func createProject(projectName string, shouldPushToGithub, isRepoPrivate bool) (*directory, error) {
