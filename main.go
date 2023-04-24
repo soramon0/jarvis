@@ -27,6 +27,7 @@ func run(args []string) error {
 	defer dir.Close()
 
 	cmd := exec.Command("git", "init", dir.Name())
+	cmd.Stdout = os.Stdout
 	if err := cmd.Run(); err != nil {
 		if err := dir.Clean(); err != nil {
 			fmt.Printf("failed to clean %s directory. %v\n", dir.friendlyName, err)
