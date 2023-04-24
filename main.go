@@ -32,13 +32,32 @@ func run(args []string) error {
 		shouldPushToGithub := cmd.Bool("gpush", false, "Push local repository to the Github using Github CLI")
 		isRepoPrivate := cmd.Bool("gprivate", false, "Make the new repository private")
 		projectName := cmd.String("p", "", "Project name")
-		cmd.Parse(os.Args[2:])
+		if err := cmd.Parse(os.Args[2:]); err != nil {
+			return err
+		}
 
 		dir, err := createProject(*projectName, *shouldPushToGithub, *isRepoPrivate)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("Your %q project is ready at\n%s\n", dir.friendlyName, dir.absPath)
+	case "delete":
+		remoteRemove := cmd.Bool("remote", false, "delete remote repository from github")
+		remoteOnly := cmd.Bool("remoteOnly", false, "delete only github remote repository")
+		projectName := cmd.String("p", "", "Project name")
+		if err := cmd.Parse(os.Args[2:]); err != nil {
+			return err
+		}
+
+		dir, err := deleteProject(*projectName, *remoteRemove, *remoteOnly)
+		if err != nil {
+			return err
+		}
+		if dir != nil {
+			fmt.Printf("Your %q project has been deleted\n", dir.friendlyName)
+		} else {
+			fmt.Printf("Your %q project has been deleted\n", *projectName)
+		}
 	default:
 		return fmt.Errorf("only create command supported")
 	}
@@ -93,6 +112,40 @@ func createProject(projectName string, shouldPushToGithub, isRepoPrivate bool) (
 	return dir, err
 }
 
+func deleteProject(projectName string, remoteRemove, remoteOlny bool) (*directory, error) {
+	if projectName == "" {
+		return nil, fmt.Errorf("project name is required")
+	}
+
+	var dir *directory
+
+	if !remoteOlny {
+		file, err := os.Open(filepath.Clean(projectName))
+		if err != nil {
+			return nil, err
+		}
+
+		diroctory, err := newDirectory(file)
+		if err != nil {
+			return nil, err
+		}
+		defer dir.Close()
+		dir = diroctory
+
+		if err := dir.Clean(); err != nil {
+			return nil, err
+		}
+	}
+
+	if remoteRemove || remoteOlny {
+		if err := removeRemoteRepository(projectName); err != nil {
+			return nil, err
+		}
+	}
+
+	return dir, nil
+}
+
 func setupGitRepo(projectName string) error {
 	cmd := exec.Command("git", "init")
 	cmd.Stdout = os.Stdout
@@ -102,7 +155,6 @@ func setupGitRepo(projectName string) error {
 
 	readmeBytes := []byte(fmt.Sprintf("# %s\n", projectName))
 	if err := os.WriteFile("README.md", readmeBytes, 0644); err != nil {
-		fmt.Println("Error", err)
 		return err
 	}
 	cmd = exec.Command("git", "add", "README.md")
@@ -126,6 +178,18 @@ func pushToGithub(projectName string, isRepoPrivate bool) error {
 	} else {
 		cmd.Args = append(cmd.Args, "--public")
 	}
+	return cmd.Run()
+}
+
+func removeRemoteRepository(projectName string) error {
+	ghPath, err := exec.LookPath("gh")
+	if err != nil {
+		return fmt.Errorf("gh command is not found. please install github cli to delete repository from github")
+	}
+	// TODO(sora): check repo exists
+	// TODO(sora): check permissions first
+	cmd := exec.Command(ghPath, "repo", "delete", projectName, "--yes")
+	cmd.Stdout = os.Stdout
 	return cmd.Run()
 }
 
