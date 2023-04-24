@@ -21,7 +21,7 @@ func run(args []string) error {
 		return fmt.Errorf("a command is required")
 	}
 
-	commands := setupCommands()
+	commands := registerCommands()
 	cmd := commands[os.Args[1]]
 	if cmd == nil {
 		return fmt.Errorf("uknown %q command", os.Args[1])
@@ -65,7 +65,7 @@ func run(args []string) error {
 	return nil
 }
 
-func setupCommands() map[string]*flag.FlagSet {
+func registerCommands() map[string]*flag.FlagSet {
 	var (
 		createCmd = flag.NewFlagSet("create", flag.ExitOnError)
 		deleteCmd = flag.NewFlagSet("delete", flag.ExitOnError)
