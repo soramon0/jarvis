@@ -29,21 +29,31 @@ func run(args []string) error {
 	cmd := exec.Command("git", "init", dir.Name())
 	if err := cmd.Run(); err != nil {
 		if err := dir.Clean(); err != nil {
-			fmt.Printf("failed to clean %s directory\n", dir.FriendlyName())
+			fmt.Printf("failed to clean %s directory. %v\n", dir.friendlyName, err)
 		}
 		return err
 	}
+	fmt.Printf("Your %q project is ready at\n%s\n", dir.friendlyName, dir.absPath)
 
 	return nil
 }
 
 type directory struct {
 	*os.File
+	// friendlyName returns either directory name or
+	// name of current directory if d.name is ".".
+	// Used mainly while printing errors
 	friendlyName string
+	absPath      string
 }
 
 func newDirectory(file *os.File) *directory {
-	return &directory{File: file}
+	friendlyName := file.Name()
+	absPath, err := filepath.Abs(friendlyName)
+	if err == nil {
+		friendlyName = filepath.Base(absPath)
+	}
+	return &directory{File: file, friendlyName: friendlyName, absPath: absPath}
 }
 
 // createDirectory creates a directory to work in if it doesn't already exist.
@@ -83,23 +93,6 @@ func (d *directory) Clean() error {
 	return os.RemoveAll(d.File.Name())
 }
 
-// FriendlyName returns either directory name or
-// name of current directory if d.name is ".".
-// Used mainly while printing errors
-func (d *directory) FriendlyName() string {
-	if d.friendlyName != "" {
-		return d.friendlyName
-	}
-	d.friendlyName = d.File.Name()
-	if d.friendlyName == "." {
-		absPath, err := filepath.Abs(d.friendlyName)
-		if err == nil {
-			d.friendlyName = filepath.Base(absPath)
-		}
-	}
-	return d.friendlyName
-}
-
 // IsEmpty returns an error if directory is not a directory
 // or if it is not an empty one
 func (d *directory) IsEmpty() error {
@@ -111,7 +104,7 @@ func (d *directory) IsEmpty() error {
 		return err
 	}
 	if !f.IsDir() {
-		return fmt.Errorf("%s is not a directory", d.FriendlyName())
+		return fmt.Errorf("%s is not a directory", d.friendlyName)
 	}
 
 	fileNames, err := d.File.Readdirnames(1)
@@ -119,7 +112,7 @@ func (d *directory) IsEmpty() error {
 		return err
 	}
 	if len(fileNames) > 0 {
-		return fmt.Errorf("%s is not an empty directory", d.FriendlyName())
+		return fmt.Errorf("%s is not an empty directory", d.friendlyName)
 	}
 
 	return nil
