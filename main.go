@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,10 @@ func main() {
 }
 
 func run(args []string) error {
+	pushToGithub := flag.Bool("gpush", false, "Push local repository to the Github using Github CLI")
+	isRepoPrivate := flag.Bool("gprivate", false, "Make the new repository private")
+	flag.Parse()
+
 	if len(os.Args) < 2 {
 		return fmt.Errorf("project name is required")
 	}
@@ -26,7 +31,12 @@ func run(args []string) error {
 	}
 	defer dir.Close()
 
-	cmd := exec.Command("git", "init", dir.Name())
+	if err := dir.ChdirToProjectDir(); err != nil {
+		return err
+	}
+	defer dir.ChdirToPWD()
+
+	cmd := exec.Command("git", "init")
 	cmd.Stdout = os.Stdout
 	if err := cmd.Run(); err != nil {
 		if err := dir.Clean(); err != nil {
@@ -34,6 +44,47 @@ func run(args []string) error {
 		}
 		return err
 	}
+
+	readmeBytes := []byte(fmt.Sprintf("# %s\n", projectName))
+	if err := os.WriteFile("README.md", readmeBytes, 0644); err != nil {
+		fmt.Println("Error", err)
+		return err
+	}
+	cmd = exec.Command("git", "add", "README.md")
+	if err := cmd.Run(); err != nil {
+		if err := dir.Clean(); err != nil {
+			fmt.Printf("failed to clean %s directory. %v\n", dir.friendlyName, err)
+		}
+		return err
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "init project")
+	if err := cmd.Run(); err != nil {
+		if err := dir.Clean(); err != nil {
+			fmt.Printf("failed to clean %s directory. %v\n", dir.friendlyName, err)
+		}
+		return err
+	}
+
+	if *pushToGithub {
+		ghPath, err := exec.LookPath("gh")
+		if err != nil {
+			fmt.Println("gh command is not found. please install github cli to push repository to github")
+		} else {
+			cmd := exec.Command(ghPath, "repo", "create", projectName, "--source=.", "--remote=upstream", "--push")
+			cmd.Stdout = os.Stdout
+
+			if *isRepoPrivate {
+				cmd.Args = append(cmd.Args, "--private")
+			} else {
+				cmd.Args = append(cmd.Args, "--public")
+			}
+			if err := cmd.Run(); err != nil {
+				return err
+			}
+		}
+	}
+
 	fmt.Printf("Your %q project is ready at\n%s\n", dir.friendlyName, dir.absPath)
 
 	return nil
@@ -46,15 +97,29 @@ type directory struct {
 	// Used mainly while printing errors
 	friendlyName string
 	absPath      string
+	pwd          string
 }
 
-func newDirectory(file *os.File) *directory {
+func newDirectory(file *os.File) (*directory, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
 	friendlyName := file.Name()
 	absPath, err := filepath.Abs(friendlyName)
-	if err == nil {
-		friendlyName = filepath.Base(absPath)
+	if err != nil {
+		return nil, err
 	}
-	return &directory{File: file, friendlyName: friendlyName, absPath: absPath}
+	friendlyName = filepath.Base(absPath)
+	return &directory{File: file, friendlyName: friendlyName, absPath: absPath, pwd: pwd}, nil
+}
+
+func (d *directory) ChdirToProjectDir() error {
+	return os.Chdir(d.absPath)
+}
+
+func (d *directory) ChdirToPWD() error {
+	return os.Chdir(d.pwd)
 }
 
 // createDirectory creates a directory to work in if it doesn't already exist.
@@ -74,11 +139,14 @@ func createDirectory(pathname string) (*directory, error) {
 			if err != nil {
 				return nil, err
 			}
-			return newDirectory(file), nil
+			return newDirectory(file)
 		}
 	}
 
-	dir := newDirectory(file)
+	dir, err := newDirectory(file)
+	if err != nil {
+		return nil, err
+	}
 	if err := dir.IsEmpty(); err != nil {
 		return nil, err
 	}
